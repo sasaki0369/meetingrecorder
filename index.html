@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会議録音コントロール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #FAF6EE;
+    --navy: #23324A;
+    --navy-soft: #3B4C6B;
+    --terracotta: #C1613B;
+    --terracotta-soft: #E8C9B8;
+    --gray-border: #DDD5C4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--cream);
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    color: var(--navy);
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px 64px;
+  }
+  .container { width: 100%; max-width: 480px; }
+  h1 {
+    font-family: "Shippori Mincho", serif;
+    font-weight: 800;
+    font-size: 1.6rem;
+    text-align: center;
+    margin: 8px 0 24px;
+    letter-spacing: 0.02em;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid var(--gray-border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 10px rgba(35,50,74,0.06);
+  }
+  .center { text-align: center; }
+  button {
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+    width: 100%;
+  }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-terracotta { background: var(--terracotta); color: #fff; }
+  .btn-outline {
+    background: #fff;
+    color: var(--navy);
+    border: 1px solid var(--navy);
+  }
+  .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+  .btn-row button { flex: 1; }
+  .status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .status-recording { background: var(--terracotta-soft); color: var(--terracotta); }
+  .status-idle { background: #EEE; color: #777; }
+  .event-title { font-size: 1.15rem; font-weight: 700; margin: 4px 0 12px; }
+  .time-row { display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--navy-soft); padding: 4px 0; }
+  .time-row span:first-child { color: #999; }
+  .divider { height: 1px; background: var(--gray-border); margin: 14px 0; }
+  .muted { color: #888; font-size: 0.9rem; }
+  .email-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.85rem; color: var(--navy-soft); margin-bottom: 16px;
+  }
+  .link-btn {
+    background: none; border: none; color: var(--terracotta);
+    font-size: 0.85rem; font-weight: 700; padding: 4px 8px; width: auto;
+  }
+  #errorBox {
+    background: #FBE7E4; color: #9A3B2E; border-radius: 12px;
+    padding: 12px 16px; margin-bottom: 16px; font-size: 0.85rem; display: none;
+  }
+  .section-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 10px; }
+  .scheduled-item {
+    border: 1px solid var(--gray-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .scheduled-item .info { min-width: 0; }
+  .scheduled-item .title {
+    font-weight: 700; font-size: 0.95rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .scheduled-item .time { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
+  .scheduled-item button {
+    width: auto; flex-shrink: 0;
+    padding: 8px 14px; font-size: 0.85rem;
+    background: var(--navy); color: #fff;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>会議録音コントロール</h1>
+
+    <div id="errorBox"></div>
+
+    <div id="loginView" class="card center">
+      <p class="muted">Googleアカウントでログインしてください。</p>
+      <button id="loginBtn" class="btn-primary">Googleでログイン</button>
+    </div>
+
+    <div id="appView" style="display:none;">
+      <div class="email-row">
+        <span id="emailLabel"></span>
+        <button id="logoutBtn" class="link-btn">ログアウト</button>
+      </div>
+
+      <div class="card" id="statusCard">
+        <div id="statusBadge" class="status-badge status-idle">待機中</div>
+        <div id="idleMessage" class="muted">現在録音中の会議はありません。</div>
+
+        <div id="recordingDetail" style="display:none;">
+          <div class="event-title" id="eventTitle"></div>
+          <div class="time-row"><span>予定</span><span id="scheduledRange"></span></div>
+          <div class="time-row"><span>実際の開始</span><span id="actualStart"></span></div>
+          <div class="time-row"><span>現在の終了予定</span><span id="currentEndTarget"></span></div>
+
+          <div class="divider"></div>
+
+          <button id="endBtn" class="btn-terracotta">終了</button>
+          <div class="btn-row">
+            <button id="extend5Btn" class="btn-outline">5分延長</button>
+            <button id="extend10Btn" class="btn-outline">10分延長</button>
+          </div>
+        </div>
+      </div>
+
+      <p class="muted center" id="lastUpdated"></p>
+
+      <div class="card" id="scheduledCard">
+        <div class="section-title">予定済みの会議</div>
+        <div id="scheduledEmpty" class="muted">現在、開始待ちの予定はありません。</div>
+        <div id="scheduledList"></div>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+  import {
+    initializeApp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+    getRedirectResult, onAuthStateChanged, signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import {
+    getDatabase, ref, onValue, push, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+  // ─────────────────────────────────────────────────────────
+  // 要設定：life--logプロジェクトのFirebase設定値に置き換えること
+  // （Firebaseコンソール > プロジェクトの設定 > 全般 > マイアプリ、から確認できる）
+  // ─────────────────────────────────────────────────────────
+  const firebaseConfig = {
+    apiKey: "AIzaSyAxVn7JUuoBsNeSODksNYyEkd2W2E252_c",
+    authDomain: "life--log.firebaseapp.com",
+    databaseURL: "https://life--log-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "life--log",
+    storageBucket: "life--log.firebasestorage.app",
+    messagingSenderId: "790653257684",
+    appId: "1:790653257684:web:c751d762e8fe2c078f3841"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getDatabase(app);
+  const provider = new GoogleAuthProvider();
+
+  const $ = (id) => document.getElementById(id);
+
+  function showError(message) {
+    const box = $("errorBox");
+    box.textContent = message;
+    box.style.display = "block";
+  }
+  function clearError() {
+    $("errorBox").style.display = "none";
+  }
+
+  // ログイン：signInWithPopupを基本とし、ブロックされた場合のみsignInWithRedirectへ
+  // フォールバックする（他アプリと同じ方式。Chromeのサードパーティストレージ制限対策）。
+  $("loginBtn").addEventListener("click", async () => {
+    clearError();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      console.warn("signInWithPopup failed, falling back to redirect", e);
+      try {
+        await signInWithRedirect(auth, provider);
+      } catch (e2) {
+        showError("ログインに失敗しました: " + e2.message);
+      }
+    }
+  });
+
+  $("logoutBtn").addEventListener("click", async () => {
+    await signOut(auth);
+  });
+
+  // リダイレクトでログインした場合の結果を拾う（ポップアップがブロックされた場合の経路）
+  getRedirectResult(auth).catch((e) => {
+    if (e && e.code && e.code !== "auth/no-auth-event") {
+      showError("ログインに失敗しました: " + e.message);
+    }
+  });
+
+  let statusUnsubscribe = null;
+  let scheduledUnsubscribe = null;
+
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      $("loginView").style.display = "none";
+      $("appView").style.display = "block";
+      $("emailLabel").textContent = user.email || "";
+      subscribeStatus();
+      subscribeScheduled();
+    } else {
+      $("loginView").style.display = "block";
+      $("appView").style.display = "none";
+      if (statusUnsubscribe) {
+        statusUnsubscribe();
+        statusUnsubscribe = null;
+      }
+      if (scheduledUnsubscribe) {
+        scheduledUnsubscribe();
+        scheduledUnsubscribe = null;
+      }
+    }
+  });
+
+  function fmtTime(ms) {
+    if (!ms) return "-";
+    const d = new Date(ms);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}/${dd} ${hh}:${mi}`;
+  }
+
+  let currentRecordingId = null;
+
+  function subscribeStatus() {
+    const statusRef = ref(db, "meetingRecorder/status");
+    statusUnsubscribe = onValue(
+      statusRef,
+      (snapshot) => {
+        clearError();
+        const data = snapshot.val();
+        renderStatus(data);
+      },
+      (error) => {
+        showError("データの取得に失敗しました（ログインしているメールアドレスに権限があるか確認してください）: " + error.message);
+      }
+    );
+  }
+
+  function renderStatus(data) {
+    const badge = $("statusBadge");
+    const idleMsg = $("idleMessage");
+    const detail = $("recordingDetail");
+
+    if (!data || data.status !== "recording") {
+      badge.textContent = "待機中";
+      badge.className = "status-badge status-idle";
+      idleMsg.style.display = "block";
+      detail.style.display = "none";
+      currentRecordingId = null;
+      $("lastUpdated").textContent = data && data.updatedAt ? "最終更新: " + fmtTime(data.updatedAt) : "";
+      return;
+    }
+
+    currentRecordingId = data.recordingId ?? null;
+    badge.textContent = "録音中";
+    badge.className = "status-badge status-recording";
+    idleMsg.style.display = "none";
+    detail.style.display = "block";
+
+    $("eventTitle").textContent = data.eventTitle || "（タイトルなし）";
+    $("scheduledRange").textContent = `${fmtTime(data.scheduledStart)} 〜 ${fmtTime(data.scheduledEnd)}`;
+    $("actualStart").textContent = fmtTime(data.recordingStartedAt);
+    $("currentEndTarget").textContent = fmtTime(data.currentEndTarget);
+    $("lastUpdated").textContent = data.updatedAt ? "最終更新: " + fmtTime(data.updatedAt) : "";
+  }
+
+  // ボタン操作：commands以下にpush()し、Android側が処理後に削除する。
+  // 連打防止のため、送信直後は短時間ボタンを無効化する。
+  async function sendCommand(type, minutes) {
+    if (currentRecordingId === null) return;
+    const buttons = [$("endBtn"), $("extend5Btn"), $("extend10Btn")];
+    buttons.forEach((b) => (b.disabled = true));
+    try {
+      const commandsRef = ref(db, "meetingRecorder/commands");
+      const payload = {
+        type,
+        recordingId: currentRecordingId,
+        requestedAt: serverTimestamp()
+      };
+      if (minutes) payload.minutes = minutes;
+      await push(commandsRef, payload);
+    } catch (e) {
+      showError("操作の送信に失敗しました: " + e.message);
+    } finally {
+      setTimeout(() => buttons.forEach((b) => (b.disabled = false)), 2000);
+    }
+  }
+
+  $("endBtn").addEventListener("click", () => sendCommand("end"));
+  $("extend5Btn").addEventListener("click", () => sendCommand("extend", 5));
+  $("extend10Btn").addEventListener("click", () => sendCommand("extend", 10));
+
+  // ─────────────────────────────────────────────────────────
+  // 予定済みの会議一覧（Android側が15分ごと・カレンダー変更時・録音開始時に同期する）
+  // ─────────────────────────────────────────────────────────
+  function subscribeScheduled() {
+    const scheduledRef = ref(db, "meetingRecorder/scheduled");
+    scheduledUnsubscribe = onValue(
+      scheduledRef,
+      (snapshot) => {
+        clearError();
+        renderScheduled(snapshot.val());
+      },
+      (error) => {
+        showError("予定一覧の取得に失敗しました: " + error.message);
+      }
+    );
+  }
+
+  function renderScheduled(data) {
+    const listEl = $("scheduledList");
+    const emptyEl = $("scheduledEmpty");
+    listEl.innerHTML = "";
+
+    const entries = data
+      ? Object.entries(data).sort((a, b) => a[1].scheduledStart - b[1].scheduledStart)
+      : [];
+
+    if (entries.length === 0) {
+      emptyEl.style.display = "block";
+      return;
+    }
+    emptyEl.style.display = "none";
+
+    for (const [recordingId, item] of entries) {
+      const row = document.createElement("div");
+      row.className = "scheduled-item";
+
+      const info = document.createElement("div");
+      info.className = "info";
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = item.eventTitle || "（タイトルなし）";
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = `${fmtTime(item.scheduledStart)} 〜 ${fmtTime(item.scheduledEnd)}`;
+      info.appendChild(title);
+      info.appendChild(time);
+
+      const startBtn = document.createElement("button");
+      startBtn.textContent = "開始";
+      startBtn.addEventListener("click", () => startRecording(recordingId, startBtn));
+
+      row.appendChild(info);
+      row.appendChild(startBtn);
+      listEl.appendChild(row);
+    }
+  }
+
+  // 「開始」ボタン：commandsへtype:"start"をpush()する。currentRecordingIdとは無関係に、
+  // 選んだ予定のIDをそのまま送る（既に別の会議を録音中の場合、Android側で待機キューに入る）。
+  async function startRecording(recordingId, buttonEl) {
+    buttonEl.disabled = true;
+    try {
+      const commandsRef = ref(db, "meetingRecorder/commands");
+      await push(commandsRef, {
+        type: "start",
+        recordingId: Number(recordingId),
+        requestedAt: serverTimestamp()
+      });
+    } catch (e) {
+      showError("開始の送信に失敗しました: " + e.message);
+    } finally {
+      setTimeout(() => (buttonEl.disabled = false), 2000);
+    }
+  }
+</script>
+</body>
+</html>
