@@ -567,6 +567,7 @@
   // ─────────────────────────────────────────────────────────
   let notesData = {};
   let editingNoteId = null;
+  let editingRecordingId = null; // 保存時に「この会議は録音継続中か」を判定するために保持
 
   function subscribeNotes() {
     const notesRef = ref(db, "meetingRecorder/notes");
@@ -647,6 +648,15 @@
     }
 
     editingNoteId = id;
+    // recordingIdが明示されていない場合（メモ一覧からの直接編集等）でも、
+    // "r<recordingId>" 形式のキーであれば会議IDを逆算し、録音継続確認の判定に使えるようにする。
+    if (recordingId != null) {
+      editingRecordingId = recordingId;
+    } else if (/^r\d+$/.test(id)) {
+      editingRecordingId = Number(id.slice(1));
+    } else {
+      editingRecordingId = null;
+    }
 
     $("noteEditorTitle").textContent = existing ? "会議メモを編集" : "会議メモを作成";
     $("noteEventTitle").value = existing?.eventTitle ?? eventTitle ?? "";
@@ -674,6 +684,7 @@
   $("noteCancelBtn").addEventListener("click", () => {
     $("noteEditorCard").style.display = "none";
     editingNoteId = null;
+    editingRecordingId = null;
   });
 
   $("noteSaveBtn").addEventListener("click", async () => {
@@ -696,6 +707,21 @@
       };
       await set(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
       $("noteSavedLabel").style.display = "block";
+
+      // メモを保存した会議が、まさに現在録音中の会議であれば、録音を止めるか確認する
+      if (
+        editingRecordingId != null &&
+        currentRecordingId != null &&
+        Number(editingRecordingId) === Number(currentRecordingId) &&
+        currentStatusData?.status === "recording"
+      ) {
+        const shouldStop = confirm(
+          "この会議の録音はまだ続いています。録音を停止しますか？"
+        );
+        if (shouldStop) {
+          await sendCommand("end");
+        }
+      }
     } catch (e) {
       showError("メモの保存に失敗しました: " + e.message);
     } finally {
