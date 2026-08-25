@@ -138,6 +138,10 @@
         <button id="logoutBtn" class="link-btn">ログアウト</button>
       </div>
 
+      <button id="startAdHocBtn" class="btn-terracotta" style="margin-bottom:16px;">
+        手動で録音開始（予定にない会議）
+      </button>
+
       <div class="card" id="statusCard">
         <div id="statusBadge" class="status-badge status-idle">待機中</div>
         <div id="idleMessage" class="muted">現在録音中の会議はありません。</div>
@@ -341,6 +345,24 @@
   $("endBtn").addEventListener("click", () => sendCommand("end"));
   $("extend5Btn").addEventListener("click", () => sendCommand("extend", 5));
   $("extend10Btn").addEventListener("click", () => sendCommand("extend", 10));
+
+  // 「手動で録音開始」：予定に紐づかない録音をAndroid側で新規作成・即開始してもらう。
+  // recordingIdは不要（Android側が作成するため）。
+  $("startAdHocBtn").addEventListener("click", async () => {
+    const btn = $("startAdHocBtn");
+    btn.disabled = true;
+    try {
+      const commandsRef = ref(db, "meetingRecorder/commands");
+      await push(commandsRef, {
+        type: "start_adhoc",
+        requestedAt: serverTimestamp()
+      });
+    } catch (e) {
+      showError("開始の送信に失敗しました: " + e.message);
+    } finally {
+      setTimeout(() => (btn.disabled = false), 2000);
+    }
+  });
 
   // ─────────────────────────────────────────────────────────
   // 予定済みの会議一覧（Android側が15分ごと・カレンダー変更時・録音開始時に同期する）
