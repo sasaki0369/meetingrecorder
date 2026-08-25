@@ -201,16 +201,9 @@
         </div>
       </div>
 
-      <p class="muted center" id="lastUpdated"></p>
-
-      <div class="card" id="scheduledCard">
-        <div class="section-title">予定済みの会議</div>
-        <div id="scheduledEmpty" class="muted">現在、開始待ちの予定はありません。</div>
-        <div id="scheduledList"></div>
-      </div>
-
       <!-- ─────────────────────────────────────────── -->
-      <!-- メモ編集フォーム -->
+      <!-- メモ編集フォーム：会議終了ボタンを押しやすいよう、当該会議（録音状態カード）の
+           すぐ下に配置する。予定済み会議から開いた場合もここに表示される。 -->
       <!-- ─────────────────────────────────────────── -->
       <div class="card" id="noteEditorCard" style="display:none;">
         <div class="section-title" id="noteEditorTitle">会議メモ</div>
@@ -261,6 +254,14 @@
           <button id="noteCancelBtn" class="btn-outline">閉じる</button>
         </div>
         <p class="muted center" id="noteSavedLabel" style="margin-top:8px; display:none;">保存しました</p>
+      </div>
+
+      <p class="muted center" id="lastUpdated"></p>
+
+      <div class="card" id="scheduledCard">
+        <div class="section-title">予定済みの会議</div>
+        <div id="scheduledEmpty" class="muted">現在、開始待ちの予定はありません。</div>
+        <div id="scheduledList"></div>
       </div>
 
       <div class="card" id="notesListCard">
@@ -663,7 +664,9 @@
 
     $("noteSavedLabel").style.display = "none";
     $("noteEditorCard").style.display = "block";
-    $("noteEditorCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    // block:"nearest"にすることで、メモ欄がstatusCard（終了ボタン）のすぐ下にある場合、
+    // 画面上部から不必要に大きくスクロールせず、終了ボタンが視界に残りやすくする。
+    $("noteEditorCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   $("newNoteBtn").addEventListener("click", () => openNoteEditor({ defaultDatetime: Date.now() }));
