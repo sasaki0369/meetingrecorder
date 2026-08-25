@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>会議録音コントロール</title>
+<title>会議メモ記録</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -30,7 +30,7 @@
     justify-content: center;
     padding: 24px 16px 64px;
   }
-  .container { width: 100%; max-width: 480px; }
+  .container { width: 100%; max-width: 640px; }
   h1 {
     font-family: "Shippori Mincho", serif;
     font-weight: 800;
@@ -68,6 +68,11 @@
     color: var(--navy);
     border: 1px solid var(--navy);
   }
+  .btn-small {
+    width: auto;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+  }
   .btn-row { display: flex; gap: 10px; margin-top: 10px; }
   .btn-row button { flex: 1; }
   .status-badge {
@@ -103,27 +108,58 @@
     border-radius: 12px;
     padding: 12px 14px;
     margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
   }
-  .scheduled-item .info { min-width: 0; }
+  .scheduled-item .info { min-width: 0; margin-bottom: 8px; }
   .scheduled-item .title {
     font-weight: 700; font-size: 0.95rem;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .scheduled-item .time { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
-  .scheduled-item button {
-    width: auto; flex-shrink: 0;
-    padding: 8px 14px; font-size: 0.85rem;
-    background: var(--navy); color: #fff;
+  .scheduled-item .btn-row button { background: var(--navy); color: #fff; }
+  .scheduled-item .btn-row .memo-btn { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
+
+  /* メモ編集フォーム */
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block; font-size: 0.85rem; font-weight: 700;
+    color: var(--navy-soft); margin-bottom: 4px;
+  }
+  .field input[type="text"],
+  .field input[type="datetime-local"],
+  .field textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-border);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--navy);
+  }
+  .field textarea { resize: vertical; min-height: 64px; }
+  .field textarea.tall { min-height: 120px; }
+
+  /* メモ一覧 */
+  .note-item {
+    border: 1px solid var(--gray-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .note-item:hover { background: var(--cream); }
+  .note-item .title { font-weight: 700; font-size: 0.95rem; }
+  .note-item .meta { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
+  .note-item .snippet {
+    font-size: 0.82rem; color: #777; margin-top: 6px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 </style>
 </head>
 <body>
   <div class="container">
-    <h1>会議録音コントロール</h1>
+    <h1>会議メモ記録</h1>
 
     <div id="errorBox"></div>
 
@@ -159,6 +195,9 @@
             <button id="extend5Btn" class="btn-outline">5分延長</button>
             <button id="extend10Btn" class="btn-outline">10分延長</button>
           </div>
+          <div class="btn-row">
+            <button id="memoCurrentBtn" class="btn-outline">この会議のメモを書く</button>
+          </div>
         </div>
       </div>
 
@@ -168,6 +207,67 @@
         <div class="section-title">予定済みの会議</div>
         <div id="scheduledEmpty" class="muted">現在、開始待ちの予定はありません。</div>
         <div id="scheduledList"></div>
+      </div>
+
+      <!-- ─────────────────────────────────────────── -->
+      <!-- メモ編集フォーム -->
+      <!-- ─────────────────────────────────────────── -->
+      <div class="card" id="noteEditorCard" style="display:none;">
+        <div class="section-title" id="noteEditorTitle">会議メモ</div>
+
+        <div class="field">
+          <label>日時</label>
+          <input type="datetime-local" id="noteDatetime">
+        </div>
+        <div class="field">
+          <label>会議名・タイトル</label>
+          <input type="text" id="noteEventTitle" placeholder="例：〇〇株式会社 定例MTG">
+        </div>
+        <div class="field">
+          <label>場所</label>
+          <input type="text" id="noteLocation" placeholder="例：オンライン（Google Meet）、〇〇会議室 等">
+        </div>
+        <div class="field">
+          <label>参加者</label>
+          <input type="text" id="noteParticipants" placeholder="例：自社: 佐々木 / 先方: 山田様、鈴木様">
+        </div>
+        <div class="field">
+          <label>相手の特徴</label>
+          <textarea id="noteCounterpart" placeholder="人柄・立場・関心事など"></textarea>
+        </div>
+        <div class="field">
+          <label>会議の終了条件</label>
+          <textarea id="notePurpose" placeholder="何が決まれば/確認できれば会議を終えられるか"></textarea>
+        </div>
+        <div class="field">
+          <label>決定事項</label>
+          <textarea id="noteDecisions"></textarea>
+        </div>
+        <div class="field">
+          <label>今後の進め方</label>
+          <textarea id="noteNextSteps"></textarea>
+        </div>
+        <div class="field">
+          <label>議事メモ</label>
+          <textarea id="noteMinutes" class="tall" placeholder="会議中の発言・気づきなどを自由に記録"></textarea>
+        </div>
+        <div class="field">
+          <label>次回への課題</label>
+          <textarea id="noteChallenges"></textarea>
+        </div>
+
+        <div class="btn-row">
+          <button id="noteSaveBtn" class="btn-primary">保存</button>
+          <button id="noteCancelBtn" class="btn-outline">閉じる</button>
+        </div>
+        <p class="muted center" id="noteSavedLabel" style="margin-top:8px; display:none;">保存しました</p>
+      </div>
+
+      <div class="card" id="notesListCard">
+        <div class="section-title">保存済みのメモ</div>
+        <button id="newNoteBtn" class="btn-outline" style="margin-bottom:14px;">新規メモを作成</button>
+        <div id="notesEmpty" class="muted">まだメモはありません。</div>
+        <div id="notesList"></div>
       </div>
     </div>
   </div>
@@ -181,13 +281,9 @@
     getRedirectResult, onAuthStateChanged, signOut
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
-    getDatabase, ref, onValue, push, serverTimestamp
+    getDatabase, ref, onValue, push, set, serverTimestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  // ─────────────────────────────────────────────────────────
-  // 要設定：life--logプロジェクトのFirebase設定値に置き換えること
-  // （Firebaseコンソール > プロジェクトの設定 > 全般 > マイアプリ、から確認できる）
-  // ─────────────────────────────────────────────────────────
   const firebaseConfig = {
     apiKey: "AIzaSyAxVn7JUuoBsNeSODksNYyEkd2W2E252_c",
     authDomain: "life--log.firebaseapp.com",
@@ -214,8 +310,9 @@
     $("errorBox").style.display = "none";
   }
 
-  // ログイン：signInWithPopupを基本とし、ブロックされた場合のみsignInWithRedirectへ
-  // フォールバックする（他アプリと同じ方式。Chromeのサードパーティストレージ制限対策）。
+  // ─────────────────────────────────────────────────────────
+  // ログイン
+  // ─────────────────────────────────────────────────────────
   $("loginBtn").addEventListener("click", async () => {
     clearError();
     try {
@@ -234,7 +331,6 @@
     await signOut(auth);
   });
 
-  // リダイレクトでログインした場合の結果を拾う（ポップアップがブロックされた場合の経路）
   getRedirectResult(auth).catch((e) => {
     if (e && e.code && e.code !== "auth/no-auth-event") {
       showError("ログインに失敗しました: " + e.message);
@@ -243,6 +339,7 @@
 
   let statusUnsubscribe = null;
   let scheduledUnsubscribe = null;
+  let notesUnsubscribe = null;
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
@@ -251,17 +348,12 @@
       $("emailLabel").textContent = user.email || "";
       subscribeStatus();
       subscribeScheduled();
+      subscribeNotes();
     } else {
       $("loginView").style.display = "block";
       $("appView").style.display = "none";
-      if (statusUnsubscribe) {
-        statusUnsubscribe();
-        statusUnsubscribe = null;
-      }
-      if (scheduledUnsubscribe) {
-        scheduledUnsubscribe();
-        scheduledUnsubscribe = null;
-      }
+      [statusUnsubscribe, scheduledUnsubscribe, notesUnsubscribe].forEach((u) => u && u());
+      statusUnsubscribe = scheduledUnsubscribe = notesUnsubscribe = null;
     }
   });
 
@@ -275,16 +367,32 @@
     return `${mm}/${dd} ${hh}:${mi}`;
   }
 
-  let currentRecordingId = null;
+  // <input type="datetime-local">用（ローカルタイムゾーンのYYYY-MM-DDTHH:mm）
+  function toDatetimeLocalValue(ms) {
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function fromDatetimeLocalValue(value) {
+    if (!value) return Date.now();
+    const d = new Date(value);
+    return d.getTime();
+  }
 
+  let currentRecordingId = null;
+  let currentStatusData = null;
+
+  // ─────────────────────────────────────────────────────────
+  // 現在の録音状態
+  // ─────────────────────────────────────────────────────────
   function subscribeStatus() {
     const statusRef = ref(db, "meetingRecorder/status");
     statusUnsubscribe = onValue(
       statusRef,
       (snapshot) => {
         clearError();
-        const data = snapshot.val();
-        renderStatus(data);
+        currentStatusData = snapshot.val();
+        renderStatus(currentStatusData);
       },
       (error) => {
         showError("データの取得に失敗しました（ログインしているメールアドレスに権限があるか確認してください）: " + error.message);
@@ -320,19 +428,13 @@
     $("lastUpdated").textContent = data.updatedAt ? "最終更新: " + fmtTime(data.updatedAt) : "";
   }
 
-  // ボタン操作：commands以下にpush()し、Android側が処理後に削除する。
-  // 連打防止のため、送信直後は短時間ボタンを無効化する。
   async function sendCommand(type, minutes) {
     if (currentRecordingId === null) return;
     const buttons = [$("endBtn"), $("extend5Btn"), $("extend10Btn")];
     buttons.forEach((b) => (b.disabled = true));
     try {
       const commandsRef = ref(db, "meetingRecorder/commands");
-      const payload = {
-        type,
-        recordingId: currentRecordingId,
-        requestedAt: serverTimestamp()
-      };
+      const payload = { type, recordingId: currentRecordingId, requestedAt: serverTimestamp() };
       if (minutes) payload.minutes = minutes;
       await push(commandsRef, payload);
     } catch (e) {
@@ -341,22 +443,16 @@
       setTimeout(() => buttons.forEach((b) => (b.disabled = false)), 2000);
     }
   }
-
   $("endBtn").addEventListener("click", () => sendCommand("end"));
   $("extend5Btn").addEventListener("click", () => sendCommand("extend", 5));
   $("extend10Btn").addEventListener("click", () => sendCommand("extend", 10));
 
-  // 「手動で録音開始」：予定に紐づかない録音をAndroid側で新規作成・即開始してもらう。
-  // recordingIdは不要（Android側が作成するため）。
   $("startAdHocBtn").addEventListener("click", async () => {
     const btn = $("startAdHocBtn");
     btn.disabled = true;
     try {
       const commandsRef = ref(db, "meetingRecorder/commands");
-      await push(commandsRef, {
-        type: "start_adhoc",
-        requestedAt: serverTimestamp()
-      });
+      await push(commandsRef, { type: "start_adhoc", requestedAt: serverTimestamp() });
     } catch (e) {
       showError("開始の送信に失敗しました: " + e.message);
     } finally {
@@ -365,19 +461,20 @@
   });
 
   // ─────────────────────────────────────────────────────────
-  // 予定済みの会議一覧（Android側が15分ごと・カレンダー変更時・録音開始時に同期する）
+  // 予定済みの会議一覧
   // ─────────────────────────────────────────────────────────
+  let scheduledData = {};
+
   function subscribeScheduled() {
     const scheduledRef = ref(db, "meetingRecorder/scheduled");
     scheduledUnsubscribe = onValue(
       scheduledRef,
       (snapshot) => {
         clearError();
-        renderScheduled(snapshot.val());
+        scheduledData = snapshot.val() || {};
+        renderScheduled(scheduledData);
       },
-      (error) => {
-        showError("予定一覧の取得に失敗しました: " + error.message);
-      }
+      (error) => showError("予定一覧の取得に失敗しました: " + error.message)
     );
   }
 
@@ -411,18 +508,32 @@
       info.appendChild(title);
       info.appendChild(time);
 
+      const btnRow = document.createElement("div");
+      btnRow.className = "btn-row";
+
       const startBtn = document.createElement("button");
       startBtn.textContent = "開始";
       startBtn.addEventListener("click", () => startRecording(recordingId, startBtn));
 
+      const memoBtn = document.createElement("button");
+      memoBtn.textContent = "メモ";
+      memoBtn.className = "memo-btn";
+      memoBtn.addEventListener("click", () => openNoteEditor({
+        recordingId,
+        eventTitle: item.eventTitle,
+        defaultDatetime: item.scheduledStart,
+        defaultLocation: item.location,
+        defaultParticipants: item.participants
+      }));
+
+      btnRow.appendChild(startBtn);
+      btnRow.appendChild(memoBtn);
       row.appendChild(info);
-      row.appendChild(startBtn);
+      row.appendChild(btnRow);
       listEl.appendChild(row);
     }
   }
 
-  // 「開始」ボタン：commandsへtype:"start"をpush()する。currentRecordingIdとは無関係に、
-  // 選んだ予定のIDをそのまま送る（既に別の会議を録音中の場合、Android側で待機キューに入る）。
   async function startRecording(recordingId, buttonEl) {
     buttonEl.disabled = true;
     try {
@@ -438,9 +549,158 @@
       setTimeout(() => (buttonEl.disabled = false), 2000);
     }
   }
+
+  $("memoCurrentBtn").addEventListener("click", () => {
+    if (!currentStatusData || currentStatusData.status !== "recording") return;
+    openNoteEditor({
+      recordingId: currentStatusData.recordingId,
+      eventTitle: currentStatusData.eventTitle,
+      defaultDatetime: currentStatusData.recordingStartedAt || currentStatusData.scheduledStart,
+      defaultLocation: currentStatusData.location,
+      defaultParticipants: currentStatusData.participants
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // 会議メモ（Firebase: meetingRecorder/notes/<recordingId>）
+  // ─────────────────────────────────────────────────────────
+  let notesData = {};
+  let editingNoteId = null;
+
+  function subscribeNotes() {
+    const notesRef = ref(db, "meetingRecorder/notes");
+    notesUnsubscribe = onValue(
+      notesRef,
+      (snapshot) => {
+        notesData = snapshot.val() || {};
+        renderNotesList(notesData);
+      },
+      (error) => showError("メモ一覧の取得に失敗しました: " + error.message)
+    );
+  }
+
+  function renderNotesList(data) {
+    const listEl = $("notesList");
+    const emptyEl = $("notesEmpty");
+    listEl.innerHTML = "";
+
+    const entries = Object.entries(data).sort((a, b) => {
+      const at = a[1].datetime || 0;
+      const bt = b[1].datetime || 0;
+      return bt - at; // 新しい順
+    });
+
+    if (entries.length === 0) {
+      emptyEl.style.display = "block";
+      return;
+    }
+    emptyEl.style.display = "none";
+
+    for (const [noteId, note] of entries) {
+      const item = document.createElement("div");
+      item.className = "note-item";
+
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = note.eventTitle || "（無題のメモ）";
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const metaParts = [fmtTime(note.datetime)];
+      if (note.location) metaParts.push(note.location);
+      meta.textContent = metaParts.join(" ・ ");
+
+      item.appendChild(title);
+      item.appendChild(meta);
+
+      if (note.minutes) {
+        const snippet = document.createElement("div");
+        snippet.className = "snippet";
+        snippet.textContent = note.minutes;
+        item.appendChild(snippet);
+      }
+
+      item.addEventListener("click", () => openNoteEditor({ noteId }));
+      listEl.appendChild(item);
+    }
+  }
+
+  // recordingId, eventTitle, defaultDatetime, defaultLocation, defaultParticipants を指定して開く
+  // （新規 or 既存の続き）。既にそのrecordingIdのメモがあれば、その内容を読み込んで編集する
+  // （既存メモの内容を優先し、Googleカレンダー由来の値で上書きしない）。
+  // noteIdを指定した場合は、メモ一覧からの直接編集（recordingIdに紐づかない場合を含む）。
+  function openNoteEditor({ recordingId, eventTitle, defaultDatetime, defaultLocation, defaultParticipants, noteId } = {}) {
+    let id = noteId;
+    let existing = null;
+
+    if (!id && recordingId != null) {
+      id = "r" + recordingId; // recordingId起点のメモは "r<id>" というキーにする
+      existing = notesData[id] || null;
+    } else if (id) {
+      existing = notesData[id] || null;
+    }
+
+    if (!id) {
+      // 完全新規（どの会議にも紐づかない）メモ
+      id = "note" + Date.now();
+    }
+
+    editingNoteId = id;
+
+    $("noteEditorTitle").textContent = existing ? "会議メモを編集" : "会議メモを作成";
+    $("noteEventTitle").value = existing?.eventTitle ?? eventTitle ?? "";
+    $("noteDatetime").value = toDatetimeLocalValue(existing?.datetime ?? defaultDatetime ?? Date.now());
+    // 場所・参加者は、既存メモに値があればそれを優先し、無ければGoogleカレンダーの
+    // 予定情報（defaultLocation/defaultParticipants）を初期値として使う。
+    $("noteLocation").value = existing?.location || defaultLocation || "";
+    $("noteParticipants").value = existing?.participants || defaultParticipants || "";
+    $("noteCounterpart").value = existing?.counterpart ?? "";
+    $("notePurpose").value = existing?.purpose ?? "";
+    $("noteDecisions").value = existing?.decisions ?? "";
+    $("noteNextSteps").value = existing?.nextSteps ?? "";
+    $("noteMinutes").value = existing?.minutes ?? "";
+    $("noteChallenges").value = existing?.challenges ?? "";
+
+    $("noteSavedLabel").style.display = "none";
+    $("noteEditorCard").style.display = "block";
+    $("noteEditorCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  $("newNoteBtn").addEventListener("click", () => openNoteEditor({ defaultDatetime: Date.now() }));
+
+  $("noteCancelBtn").addEventListener("click", () => {
+    $("noteEditorCard").style.display = "none";
+    editingNoteId = null;
+  });
+
+  $("noteSaveBtn").addEventListener("click", async () => {
+    if (!editingNoteId) return;
+    const btn = $("noteSaveBtn");
+    btn.disabled = true;
+    try {
+      const payload = {
+        eventTitle: $("noteEventTitle").value.trim(),
+        datetime: fromDatetimeLocalValue($("noteDatetime").value),
+        location: $("noteLocation").value.trim(),
+        participants: $("noteParticipants").value.trim(),
+        counterpart: $("noteCounterpart").value.trim(),
+        purpose: $("notePurpose").value.trim(),
+        decisions: $("noteDecisions").value.trim(),
+        nextSteps: $("noteNextSteps").value.trim(),
+        minutes: $("noteMinutes").value.trim(),
+        challenges: $("noteChallenges").value.trim(),
+        updatedAt: serverTimestamp()
+      };
+      await set(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
+      $("noteSavedLabel").style.display = "block";
+    } catch (e) {
+      showError("メモの保存に失敗しました: " + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 </script>
 <script>
-  // PWA化：サービスワーカーを登録し、PCやスマホのブラウザから「インストール」できるようにする
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("sw.js").catch((e) => {
