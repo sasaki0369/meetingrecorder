@@ -267,11 +267,18 @@
           <label>次回への課題</label>
           <textarea id="noteChallenges"></textarea>
         </div>
+        <div class="field">
+          <label>AI要約</label>
+          <textarea id="noteAiSummary" class="tall" placeholder="Androidアプリで生成したClaude要約が自動的に入ります（編集も可能）"></textarea>
+        </div>
 
         <div class="btn-row">
           <button id="noteSaveBtn" class="btn-primary">保存</button>
           <button id="noteCancelBtn" class="btn-outline">閉じる</button>
         </div>
+        <button id="noteDeleteBtn" class="btn-outline" style="margin-top:10px; color:#9A3B2E; border-color:#9A3B2E;">
+          このメモを削除
+        </button>
         <p class="muted center" id="noteSavedLabel" style="margin-top:8px; display:none;">保存しました</p>
       </div>
 
@@ -306,7 +313,7 @@
     getRedirectResult, onAuthStateChanged, signOut
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
-    getDatabase, ref, onValue, push, set, serverTimestamp
+    getDatabase, ref, onValue, push, set, get, remove, serverTimestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
   const firebaseConfig = {
@@ -655,7 +662,7 @@
   // （新規 or 既存の続き）。既にそのrecordingIdのメモがあれば、その内容を読み込んで編集する
   // （既存メモの内容を優先し、Googleカレンダー由来の値で上書きしない）。
   // noteIdを指定した場合は、メモ一覧からの直接編集（recordingIdに紐づかない場合を含む）。
-  function openNoteEditor({ recordingId, eventTitle, defaultDatetime, defaultLocation, defaultParticipants, noteId } = {}) {
+  async function openNoteEditor({ recordingId, eventTitle, defaultDatetime, defaultLocation, defaultParticipants, noteId } = {}) {
     let id = noteId;
     let existing = null;
 
@@ -695,12 +702,32 @@
     $("noteNextSteps").value = existing?.nextSteps ?? "";
     $("noteMinutes").value = existing?.minutes ?? "";
     $("noteChallenges").value = existing?.challenges ?? "";
+    $("noteAiSummary").value = existing?.aiSummary ?? "";
+    // メモ削除ボタンは、既に保存済みのメモを開いた場合のみ表示する（新規作成時は無意味なため）
+    $("noteDeleteBtn").style.display = existing ? "block" : "none";
 
     $("noteSavedLabel").style.display = "none";
     $("noteEditorCard").style.display = "block";
     // block:"nearest"にすることで、メモ欄がstatusCard（終了ボタン）のすぐ下にある場合、
     // 画面上部から不必要に大きくスクロールせず、終了ボタンが視界に残りやすくする。
     $("noteEditorCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    // AI要約：既存メモに保存済みの内容があればそれを優先する（編集内容を上書きしないため）。
+    // 無ければ、Android側がClaude要約完成時に送信するmeetingRecorder/summaries/<recordingId>を
+    // 一度だけ取得して初期値にする（対象会議が分かっている場合のみ）。
+    if (!existing?.aiSummary && editingRecordingId != null) {
+      try {
+        const snap = await get(ref(db, "meetingRecorder/summaries/" + editingRecordingId));
+        const summaryText = snap.exists() ? snap.val().summaryText : null;
+        // 取得中にユーザーが別のメモを開いていたら上書きしない
+        if (summaryText && editingNoteId === id) {
+          $("noteAiSummary").value = summaryText;
+        }
+      } catch (e) {
+        // 要約が無い・取得に失敗しても致命的ではないため、エラー表示はしない
+        console.warn("AI要約の取得に失敗しました", e);
+      }
+    }
   }
 
   $("newNoteBtn").addEventListener("click", () => openNoteEditor({ defaultDatetime: Date.now() }));
@@ -740,10 +767,12 @@
         nextSteps: $("noteNextSteps").value.trim(),
         minutes: $("noteMinutes").value.trim(),
         challenges: $("noteChallenges").value.trim(),
+        aiSummary: $("noteAiSummary").value.trim(),
         updatedAt: serverTimestamp()
       };
       await set(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
       $("noteSavedLabel").style.display = "block";
+      $("noteDeleteBtn").style.display = "block"; // 新規作成分も保存後は削除できるようにする
 
       // メモを保存した会議が、まさに現在録音中の会議であれば、録音を止めるか確認する
       if (
@@ -761,6 +790,25 @@
       }
     } catch (e) {
       showError("メモの保存に失敗しました: " + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("noteDeleteBtn").addEventListener("click", async () => {
+    if (!editingNoteId) return;
+    const title = $("noteEventTitle").value.trim() || "（無題のメモ）";
+    if (!confirm(`「${title}」のメモを削除しますか？この操作は元に戻せません。`)) return;
+
+    const btn = $("noteDeleteBtn");
+    btn.disabled = true;
+    try {
+      await remove(ref(db, "meetingRecorder/notes/" + editingNoteId));
+      $("noteEditorCard").style.display = "none";
+      editingNoteId = null;
+      editingRecordingId = null;
+    } catch (e) {
+      showError("メモの削除に失敗しました: " + e.message);
     } finally {
       btn.disabled = false;
     }
