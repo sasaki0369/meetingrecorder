@@ -782,7 +782,7 @@
         currentStatusData?.status === "recording"
       ) {
         const shouldStop = confirm(
-          "この会議はまだ進行中です。終了しますか？"
+          "この会議の録音はまだ続いています。録音を停止しますか？"
         );
         if (shouldStop) {
           await sendCommand("end");
