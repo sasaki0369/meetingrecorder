@@ -1,4 +1,4 @@
-const CACHE_NAME = "meeting-recorder-web-v1";
+const CACHE_NAME = "meeting-recorder-web-v2";
 const PRECACHE_URLS = [
   "./",
   "./index.html",
@@ -44,8 +44,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // manifest.jsonはPWAのアプリ名等が変わった際に反映が遅れやすいため、
+  // 同一オリジンの他ファイルとは別扱いでネットワーク優先にする。
+  if (url.pathname.endsWith("/manifest.json")) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
   if (url.origin === self.location.origin) {
-    // 同一オリジン（アイコン・マニフェスト等）はキャッシュファースト
+    // 同一オリジン（アイコン等）はキャッシュファースト
     event.respondWith(
       caches.match(req).then((cached) => {
         if (cached) return cached;
