@@ -1,7 +1,7 @@
 {
-  "name": "会議録音コントロール",
-  "short_name": "会議録音",
-  "description": "Android版「会議録自動録音」アプリと連動する、録音の状態確認・終了/延長/開始操作用アプリ",
+  "name": "会議メモ記録",
+  "short_name": "会議メモ",
+  "description": "Android版「会議録自動録音」アプリと連動する、会議メモ記録・状態確認用アプリ",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
