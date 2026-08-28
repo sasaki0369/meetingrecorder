@@ -194,12 +194,12 @@
       </div>
 
       <button id="startAdHocBtn" class="btn-terracotta" style="margin-bottom:16px;">
-        手動で録音開始（予定にない会議）
+        会議開始（予定にない会議）
       </button>
 
       <div class="card" id="statusCard">
         <div id="statusBadge" class="status-badge status-idle">待機中</div>
-        <div id="idleMessage" class="muted">現在録音中の会議はありません。</div>
+        <div id="idleMessage" class="muted">現在進行中の会議はありません。</div>
 
         <div id="recordingDetail" style="display:none;">
           <div class="event-title" id="eventTitle"></div>
@@ -448,7 +448,7 @@
     }
 
     currentRecordingId = data.recordingId ?? null;
-    badge.textContent = "録音中";
+    badge.textContent = "会議中";
     badge.className = "status-badge status-recording";
     idleMsg.style.display = "none";
     detail.style.display = "block";
@@ -774,7 +774,7 @@
       $("noteSavedLabel").style.display = "block";
       $("noteDeleteBtn").style.display = "block"; // 新規作成分も保存後は削除できるようにする
 
-      // メモを保存した会議が、まさに現在録音中の会議であれば、録音を止めるか確認する
+      // メモを保存した会議が、まさに現在進行中の会議であれば、終了するか確認する
       if (
         editingRecordingId != null &&
         currentRecordingId != null &&
@@ -782,7 +782,7 @@
         currentStatusData?.status === "recording"
       ) {
         const shouldStop = confirm(
-          "この会議の録音はまだ続いています。録音を停止しますか？"
+          "この会議はまだ進行中です。終了しますか？"
         );
         if (shouldStop) {
           await sendCommand("end");
