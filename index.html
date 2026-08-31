@@ -156,7 +156,7 @@
     color: var(--navy);
   }
   .field textarea { resize: vertical; min-height: 64px; }
-  .field textarea.tall { min-height: 120px; }
+  .field textarea.tall { min-height: 120px; overflow-y: hidden; }
 
   /* メモ一覧 */
   .note-item {
@@ -332,6 +332,14 @@
   const provider = new GoogleAuthProvider();
 
   const $ = (id) => document.getElementById(id);
+
+  // 「議事メモ」欄は、入力量が増えるにつれて枠内スクロールではなく、
+  // 欄自体の高さが伸びていくようにする（一度縮めてから内容に合わせて広げ直す）。
+  function autoResizeTextarea(el) {
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }
+  $("noteMinutes").addEventListener("input", () => autoResizeTextarea($("noteMinutes")));
 
   function showError(message) {
     const box = $("errorBox");
@@ -701,6 +709,7 @@
     $("noteDecisions").value = existing?.decisions ?? "";
     $("noteNextSteps").value = existing?.nextSteps ?? "";
     $("noteMinutes").value = existing?.minutes ?? "";
+    autoResizeTextarea($("noteMinutes"));
     $("noteChallenges").value = existing?.challenges ?? "";
     $("noteAiSummary").value = existing?.aiSummary ?? "";
     // メモ削除ボタンは、既に保存済みのメモを開いた場合のみ表示する（新規作成時は無意味なため）
