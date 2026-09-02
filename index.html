@@ -783,6 +783,21 @@
       $("noteSavedLabel").style.display = "block";
       $("noteDeleteBtn").style.display = "block"; // 新規作成分も保存後は削除できるようにする
 
+      // 対象の会議（recordingIdが分かっている場合）の会議名を、Android側のデータベースにも
+      // 反映する。空欄でなければ常に送る（変更が無くても同じ値で上書きするだけなので害はない）。
+      if (editingRecordingId != null && payload.eventTitle) {
+        try {
+          await push(ref(db, "meetingRecorder/commands"), {
+            type: "rename",
+            recordingId: Number(editingRecordingId),
+            newTitle: payload.eventTitle,
+            requestedAt: serverTimestamp()
+          });
+        } catch (e) {
+          console.warn("会議名のAndroidへの反映に失敗しました", e);
+        }
+      }
+
       // メモを保存した会議が、まさに現在進行中の会議であれば、終了するか確認する
       if (
         editingRecordingId != null &&
