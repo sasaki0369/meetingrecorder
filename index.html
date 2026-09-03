@@ -168,6 +168,17 @@
   }
   .note-item:hover { background: var(--cream); }
   .note-item .title { font-weight: 700; font-size: 0.95rem; }
+  .summary-only-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--terracotta-soft);
+    color: var(--terracotta);
+    font-size: 0.7rem;
+    font-weight: 700;
+    vertical-align: middle;
+  }
   .note-item .meta { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
   .note-item .snippet {
     font-size: 0.82rem; color: #777; margin-top: 6px;
@@ -380,6 +391,7 @@
   let statusUnsubscribe = null;
   let scheduledUnsubscribe = null;
   let notesUnsubscribe = null;
+  let summariesUnsubscribe = null;
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
@@ -392,8 +404,8 @@
     } else {
       $("loginView").style.display = "block";
       $("appView").style.display = "none";
-      [statusUnsubscribe, scheduledUnsubscribe, notesUnsubscribe].forEach((u) => u && u());
-      statusUnsubscribe = scheduledUnsubscribe = notesUnsubscribe = null;
+      [statusUnsubscribe, scheduledUnsubscribe, notesUnsubscribe, summariesUnsubscribe].forEach((u) => u && u());
+      statusUnsubscribe = scheduledUnsubscribe = notesUnsubscribe = summariesUnsubscribe = null;
     }
   });
 
@@ -605,8 +617,49 @@
   // 会議メモ（Firebase: meetingRecorder/notes/<recordingId>）
   // ─────────────────────────────────────────────────────────
   let notesData = {};
+  let summariesData = {}; // meetingRecorder/summaries（Android側が要約完成時に送信、キーはrecordingId）
   let editingNoteId = null;
   let editingRecordingId = null; // 保存時に「この会議は録音継続中か」を判定するために保持
+  let originalNoteSnapshot = null; // 開いた時点（または保存直後）の内容。未保存の変更検知に使う
+
+  // 現在フォームに入力されている内容をスナップショット化する（比較用の文字列）
+  function captureNoteSnapshot() {
+    return JSON.stringify({
+      eventTitle: $("noteEventTitle").value,
+      datetime: $("noteDatetime").value,
+      location: $("noteLocation").value,
+      participants: $("noteParticipants").value,
+      counterpart: $("noteCounterpart").value,
+      purpose: $("notePurpose").value,
+      decisions: $("noteDecisions").value,
+      nextSteps: $("noteNextSteps").value,
+      minutes: $("noteMinutes").value,
+      challenges: $("noteChallenges").value,
+      aiSummary: $("noteAiSummary").value
+    });
+  }
+
+  // メモ編集フォームが開いていて、かつ開いた時点から内容が変わっていればtrue
+  function hasUnsavedNoteChanges() {
+    if ($("noteEditorCard").style.display !== "block") return false;
+    if (originalNoteSnapshot === null) return false;
+    return captureNoteSnapshot() !== originalNoteSnapshot;
+  }
+
+  // 未保存の変更があれば確認ダイアログを出す。「続行してよい」場合にtrueを返す
+  // （変更が無い、またはユーザーが破棄を承諾した場合はtrue。ユーザーが拒否した場合はfalse）。
+  function confirmDiscardUnsavedNoteChanges() {
+    if (!hasUnsavedNoteChanges()) return true;
+    return confirm("編集中のメモに保存されていない変更があります。破棄してもよろしいですか？");
+  }
+
+  // タブを閉じる・再読み込みする際にも、未保存の変更があれば警告する
+  window.addEventListener("beforeunload", (e) => {
+    if (hasUnsavedNoteChanges()) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
 
   function subscribeNotes() {
     const notesRef = ref(db, "meetingRecorder/notes");
@@ -614,18 +667,45 @@
       notesRef,
       (snapshot) => {
         notesData = snapshot.val() || {};
-        renderNotesList(notesData);
+        renderNotesList();
       },
       (error) => showError("メモ一覧の取得に失敗しました: " + error.message)
     );
+
+    // AndroidでAI要約が完成した会議は、Webでまだメモを作成していなくても一覧から
+    // 開けるようにする（「AI要約はあるがメモは未作成」の状態として表示する）。
+    const summariesRef = ref(db, "meetingRecorder/summaries");
+    summariesUnsubscribe = onValue(
+      summariesRef,
+      (snapshot) => {
+        summariesData = snapshot.val() || {};
+        renderNotesList();
+      },
+      (error) => console.warn("要約一覧の取得に失敗しました", error)
+    );
   }
 
-  function renderNotesList(data) {
+  function renderNotesList() {
     const listEl = $("notesList");
     const emptyEl = $("notesEmpty");
     listEl.innerHTML = "";
 
-    const entries = Object.entries(data).sort((a, b) => {
+    // 保存済みのメモ（notes）に、まだメモが無い「AI要約のみ」の会議（summaries）を
+    // 合わせて一覧化する。既にメモがある会議（"r<recordingId>"キーが存在）は重複させない。
+    const summaryOnlyEntries = Object.entries(summariesData)
+      .filter(([recordingId]) => !("r" + recordingId in notesData))
+      .map(([recordingId, summary]) => [
+        "r" + recordingId,
+        {
+          eventTitle: summary.eventTitle,
+          datetime: summary.datetime,
+          minutes: summary.summaryText,
+          _summaryOnly: true,
+          _recordingId: recordingId
+        }
+      ]);
+
+    const entries = [...Object.entries(notesData), ...summaryOnlyEntries].sort((a, b) => {
       const at = a[1].datetime || 0;
       const bt = b[1].datetime || 0;
       return bt - at; // 新しい順
@@ -644,6 +724,12 @@
       const title = document.createElement("div");
       title.className = "title";
       title.textContent = note.eventTitle || "（無題のメモ）";
+      if (note._summaryOnly) {
+        const badge = document.createElement("span");
+        badge.className = "summary-only-badge";
+        badge.textContent = "AI要約のみ";
+        title.appendChild(badge);
+      }
 
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -661,7 +747,21 @@
         item.appendChild(snippet);
       }
 
-      item.addEventListener("click", () => openNoteEditor({ noteId }));
+      item.addEventListener("click", () => {
+        if (!confirmDiscardUnsavedNoteChanges()) return;
+        if (note._summaryOnly) {
+          // まだメモが存在しないため、recordingId起点で新規作成として開く
+          // （タイトル・日時はsummariesの内容を初期値として渡す。AI要約はopenNoteEditor内で
+          // 改めてmeetingRecorder/summaries/<recordingId>から取得される）
+          openNoteEditor({
+            recordingId: Number(note._recordingId),
+            eventTitle: note.eventTitle,
+            defaultDatetime: note.datetime
+          });
+        } else {
+          openNoteEditor({ noteId });
+        }
+      });
       listEl.appendChild(item);
     }
   }
@@ -671,6 +771,9 @@
   // （既存メモの内容を優先し、Googleカレンダー由来の値で上書きしない）。
   // noteIdを指定した場合は、メモ一覧からの直接編集（recordingIdに紐づかない場合を含む）。
   async function openNoteEditor({ recordingId, eventTitle, defaultDatetime, defaultLocation, defaultParticipants, noteId } = {}) {
+    // 既にメモ編集フォームが開いていて未保存の変更がある場合、破棄してよいか確認する
+    if (!confirmDiscardUnsavedNoteChanges()) return;
+
     let id = noteId;
     let existing = null;
 
@@ -721,6 +824,9 @@
     // 画面上部から不必要に大きくスクロールせず、終了ボタンが視界に残りやすくする。
     $("noteEditorCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
 
+    // ここまでで入力した内容を「開いた時点」の基準として記録する
+    originalNoteSnapshot = captureNoteSnapshot();
+
     // AI要約：既存メモに保存済みの内容があればそれを優先する（編集内容を上書きしないため）。
     // 無ければ、Android側がClaude要約完成時に送信するmeetingRecorder/summaries/<recordingId>を
     // 一度だけ取得して初期値にする（対象会議が分かっている場合のみ）。
@@ -731,6 +837,8 @@
         // 取得中にユーザーが別のメモを開いていたら上書きしない
         if (summaryText && editingNoteId === id) {
           $("noteAiSummary").value = summaryText;
+          // AI要約が後から自動で入った分は「未変更」の基準に含める（ユーザーの編集ではないため）
+          originalNoteSnapshot = captureNoteSnapshot();
         }
       } catch (e) {
         // 要約が無い・取得に失敗しても致命的ではないため、エラー表示はしない
@@ -755,9 +863,11 @@
   $("tabNotesBtn").addEventListener("click", () => switchTab("notes"));
 
   $("noteCancelBtn").addEventListener("click", () => {
+    if (!confirmDiscardUnsavedNoteChanges()) return;
     $("noteEditorCard").style.display = "none";
     editingNoteId = null;
     editingRecordingId = null;
+    originalNoteSnapshot = null;
   });
 
   $("noteSaveBtn").addEventListener("click", async () => {
@@ -782,6 +892,7 @@
       await set(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
       $("noteSavedLabel").style.display = "block";
       $("noteDeleteBtn").style.display = "block"; // 新規作成分も保存後は削除できるようにする
+      originalNoteSnapshot = captureNoteSnapshot(); // 保存済みの内容を新たな基準にする
 
       // 対象の会議（recordingIdが分かっている場合）の会議名を、Android側のデータベースにも
       // 反映する。空欄でなければ常に送る（変更が無くても同じ値で上書きするだけなので害はない）。
@@ -831,6 +942,7 @@
       $("noteEditorCard").style.display = "none";
       editingNoteId = null;
       editingRecordingId = null;
+      originalNoteSnapshot = null;
     } catch (e) {
       showError("メモの削除に失敗しました: " + e.message);
     } finally {
