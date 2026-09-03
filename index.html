@@ -179,6 +179,10 @@
     font-weight: 700;
     vertical-align: middle;
   }
+  .finished-only-badge {
+    background: #EEE;
+    color: #777;
+  }
   .note-item .meta { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
   .note-item .snippet {
     font-size: 0.82rem; color: #777; margin-top: 6px;
@@ -392,6 +396,7 @@
   let scheduledUnsubscribe = null;
   let notesUnsubscribe = null;
   let summariesUnsubscribe = null;
+  let finishedUnsubscribe = null;
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
@@ -404,8 +409,8 @@
     } else {
       $("loginView").style.display = "block";
       $("appView").style.display = "none";
-      [statusUnsubscribe, scheduledUnsubscribe, notesUnsubscribe, summariesUnsubscribe].forEach((u) => u && u());
-      statusUnsubscribe = scheduledUnsubscribe = notesUnsubscribe = summariesUnsubscribe = null;
+      [statusUnsubscribe, scheduledUnsubscribe, notesUnsubscribe, summariesUnsubscribe, finishedUnsubscribe].forEach((u) => u && u());
+      statusUnsubscribe = scheduledUnsubscribe = notesUnsubscribe = summariesUnsubscribe = finishedUnsubscribe = null;
     }
   });
 
@@ -618,6 +623,7 @@
   // ─────────────────────────────────────────────────────────
   let notesData = {};
   let summariesData = {}; // meetingRecorder/summaries（Android側が要約完成時に送信、キーはrecordingId）
+  let finishedData = {}; // meetingRecorder/finished（要約の有無を問わず終了済みの会議、直近30日分）
   let editingNoteId = null;
   let editingRecordingId = null; // 保存時に「この会議は録音継続中か」を判定するために保持
   let originalNoteSnapshot = null; // 開いた時点（または保存直後）の内容。未保存の変更検知に使う
@@ -683,6 +689,18 @@
       },
       (error) => console.warn("要約一覧の取得に失敗しました", error)
     );
+
+    // 要約の有無に関わらず、終了済みの会議（直近30日分、Android側で絞り込み済み）も
+    // 一覧に表示し、メモだけ先に作成できるようにする。
+    const finishedRef = ref(db, "meetingRecorder/finished");
+    finishedUnsubscribe = onValue(
+      finishedRef,
+      (snapshot) => {
+        finishedData = snapshot.val() || {};
+        renderNotesList();
+      },
+      (error) => console.warn("終了済み会議一覧の取得に失敗しました", error)
+    );
   }
 
   function renderNotesList() {
@@ -690,8 +708,9 @@
     const emptyEl = $("notesEmpty");
     listEl.innerHTML = "";
 
-    // 保存済みのメモ（notes）に、まだメモが無い「AI要約のみ」の会議（summaries）を
-    // 合わせて一覧化する。既にメモがある会議（"r<recordingId>"キーが存在）は重複させない。
+    // 保存済みのメモ（notes）に、まだメモが無い「AI要約のみ」の会議（summaries）、
+    // さらに要約も無い「終了済みのみ」の会議（finished）を合わせて一覧化する。
+    // 優先順位は notes > summaries > finished とし、同じ会議を重複表示しない。
     const summaryOnlyEntries = Object.entries(summariesData)
       .filter(([recordingId]) => !("r" + recordingId in notesData))
       .map(([recordingId, summary]) => [
@@ -705,7 +724,19 @@
         }
       ]);
 
-    const entries = [...Object.entries(notesData), ...summaryOnlyEntries].sort((a, b) => {
+    const finishedOnlyEntries = Object.entries(finishedData)
+      .filter(([recordingId]) => !("r" + recordingId in notesData) && !(recordingId in summariesData))
+      .map(([recordingId, finished]) => [
+        "r" + recordingId,
+        {
+          eventTitle: finished.eventTitle,
+          datetime: finished.datetime,
+          _finishedOnly: true,
+          _recordingId: recordingId
+        }
+      ]);
+
+    const entries = [...Object.entries(notesData), ...summaryOnlyEntries, ...finishedOnlyEntries].sort((a, b) => {
       const at = a[1].datetime || 0;
       const bt = b[1].datetime || 0;
       return bt - at; // 新しい順
@@ -729,6 +760,11 @@
         badge.className = "summary-only-badge";
         badge.textContent = "AI要約のみ";
         title.appendChild(badge);
+      } else if (note._finishedOnly) {
+        const badge = document.createElement("span");
+        badge.className = "summary-only-badge finished-only-badge";
+        badge.textContent = "メモ未作成";
+        title.appendChild(badge);
       }
 
       const meta = document.createElement("div");
@@ -749,10 +785,10 @@
 
       item.addEventListener("click", () => {
         if (!confirmDiscardUnsavedNoteChanges()) return;
-        if (note._summaryOnly) {
+        if (note._summaryOnly || note._finishedOnly) {
           // まだメモが存在しないため、recordingId起点で新規作成として開く
-          // （タイトル・日時はsummariesの内容を初期値として渡す。AI要約はopenNoteEditor内で
-          // 改めてmeetingRecorder/summaries/<recordingId>から取得される）
+          // （タイトル・日時はsummaries/finishedの内容を初期値として渡す。AI要約が存在すれば
+          // openNoteEditor内で改めてmeetingRecorder/summaries/<recordingId>から取得される）
           openNoteEditor({
             recordingId: Number(note._recordingId),
             eventTitle: note.eventTitle,
