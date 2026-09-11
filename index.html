@@ -287,6 +287,19 @@
           <textarea id="noteAiSummary" class="tall" placeholder="Androidアプリで生成したClaude要約が自動的に入ります（編集も可能）"></textarea>
         </div>
 
+        <div class="field" id="androidActionsField">
+          <label>Android側での実行</label>
+          <p class="muted" style="margin: 0 0 8px;">
+            対応するAndroidアプリ側の録音に対して、文字起こし・要約の実行を指示できます。
+            結果はAndroid側にテキストとして保存されます（要約は完成後、この画面のAI要約欄にも
+            自動的に反映されます）。
+          </p>
+          <div class="btn-row">
+            <button id="noteTranscribeBtn" class="btn-outline">文字起こしを実行</button>
+            <button id="noteSummarizeBtn" class="btn-outline">要約を作成</button>
+          </div>
+        </div>
+
         <div class="btn-row">
           <button id="noteSaveBtn" class="btn-primary">保存</button>
           <button id="noteCancelBtn" class="btn-outline">閉じる</button>
@@ -500,7 +513,28 @@
       setTimeout(() => buttons.forEach((b) => (b.disabled = false)), 2000);
     }
   }
-  $("endBtn").addEventListener("click", () => sendCommand("end"));
+
+  // 録音を終了した直後に、その会議の文字起こしを行うか確認し、「はい」ならAndroid側へ指示する。
+  // recordingIdはNumberに変換可能な値（currentRecordingId・editingRecordingIdいずれも想定）。
+  async function promptTranscribeAfterStop(recordingId) {
+    if (recordingId == null) return;
+    if (!confirm("文字起こししますか？")) return;
+    try {
+      await push(ref(db, "meetingRecorder/commands"), {
+        type: "transcribe",
+        recordingId: Number(recordingId),
+        requestedAt: serverTimestamp()
+      });
+    } catch (e) {
+      showError("文字起こし指示の送信に失敗しました: " + e.message);
+    }
+  }
+
+  $("endBtn").addEventListener("click", async () => {
+    const targetId = currentRecordingId;
+    await sendCommand("end");
+    await promptTranscribeAfterStop(targetId);
+  });
   $("extend5Btn").addEventListener("click", () => sendCommand("extend", 5));
   $("extend10Btn").addEventListener("click", () => sendCommand("extend", 10));
 
@@ -835,6 +869,9 @@
     } else {
       editingRecordingId = null;
     }
+    // 「新規メモを作成」で作った、どの会議にも紐づかない単独メモには対応する録音が
+    // 存在しないため、文字起こし・要約の実行ボタンは表示しない。
+    $("androidActionsField").style.display = editingRecordingId != null ? "block" : "none";
 
     $("noteEditorTitle").textContent = existing ? "会議メモを編集" : "会議メモを作成";
     $("noteEventTitle").value = existing?.eventTitle ?? eventTitle ?? "";
@@ -906,6 +943,36 @@
     originalNoteSnapshot = null;
   });
 
+  // Android側に文字起こし・要約の実行を指示する。結果はAndroid側にテキストとして保存され、
+  // 要約は完成後、この画面を再度開いた際（またはポーリングによる自己修復同期後）に
+  // AI要約欄へ自動的に反映される。
+  async function sendAndroidActionCommand(type, buttonEl, doneLabel) {
+    if (editingRecordingId == null) return;
+    const originalLabel = buttonEl.textContent;
+    buttonEl.disabled = true;
+    buttonEl.textContent = doneLabel;
+    try {
+      await push(ref(db, "meetingRecorder/commands"), {
+        type,
+        recordingId: Number(editingRecordingId),
+        requestedAt: serverTimestamp()
+      });
+    } catch (e) {
+      showError("指示の送信に失敗しました: " + e.message);
+    } finally {
+      setTimeout(() => {
+        buttonEl.disabled = false;
+        buttonEl.textContent = originalLabel;
+      }, 3000);
+    }
+  }
+  $("noteTranscribeBtn").addEventListener("click", () =>
+    sendAndroidActionCommand("transcribe", $("noteTranscribeBtn"), "指示を送信しました")
+  );
+  $("noteSummarizeBtn").addEventListener("click", () =>
+    sendAndroidActionCommand("summarize", $("noteSummarizeBtn"), "指示を送信しました")
+  );
+
   $("noteSaveBtn").addEventListener("click", async () => {
     if (!editingNoteId) return;
     const btn = $("noteSaveBtn");
@@ -957,6 +1024,7 @@
         );
         if (shouldStop) {
           await sendCommand("end");
+          await promptTranscribeAfterStop(editingRecordingId);
         }
       }
     } catch (e) {
