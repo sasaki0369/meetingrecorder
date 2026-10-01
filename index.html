@@ -75,6 +75,14 @@
   }
   .btn-row { display: flex; gap: 10px; margin-top: 10px; }
   .btn-row button { flex: 1; }
+  .date-range-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .date-range-row .field { flex: 1; }
+  .date-range-row .btn-small { flex-shrink: 0; }
   .status-badge {
     display: inline-block;
     padding: 4px 12px;
@@ -326,7 +334,24 @@
       <div class="card" id="notesListCard" style="display:none;">
         <div class="section-title">保存済みのメモ</div>
         <button id="newNoteBtn" class="btn-outline" style="margin-bottom:14px;">新規メモを作成</button>
+
+        <div class="field">
+          <input type="text" id="notesSearchInput" placeholder="キーワードで検索（会議名・場所・参加者・本文など）">
+        </div>
+        <div class="date-range-row">
+          <div class="field" style="margin-bottom:0;">
+            <label>期間（開始）</label>
+            <input type="date" id="notesDateFrom">
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>期間（終了）</label>
+            <input type="date" id="notesDateTo">
+          </div>
+          <button id="notesDateClearBtn" class="btn-outline btn-small">クリア</button>
+        </div>
+
         <div id="notesEmpty" class="muted">まだメモはありません。</div>
+        <div id="notesNoMatch" class="muted" style="display:none;">条件に一致するメモが見つかりません。</div>
         <div id="notesList"></div>
       </div>
     </div>
@@ -737,9 +762,15 @@
     );
   }
 
+  // キーワード検索・期間絞り込みの状態
+  let notesSearchQuery = "";
+  let notesDateFromMs = null;
+  let notesDateToMs = null;
+
   function renderNotesList() {
     const listEl = $("notesList");
     const emptyEl = $("notesEmpty");
+    const noMatchEl = $("notesNoMatch");
     listEl.innerHTML = "";
 
     // 保存済みのメモ（notes）に、まだメモが無い「AI要約のみ」の会議（summaries）、
@@ -770,17 +801,40 @@
         }
       ]);
 
-    const entries = [...Object.entries(notesData), ...summaryOnlyEntries, ...finishedOnlyEntries].sort((a, b) => {
+    const allEntries = [...Object.entries(notesData), ...summaryOnlyEntries, ...finishedOnlyEntries].sort((a, b) => {
       const at = a[1].datetime || 0;
       const bt = b[1].datetime || 0;
       return bt - at; // 新しい順
     });
 
-    if (entries.length === 0) {
+    if (allEntries.length === 0) {
       emptyEl.style.display = "block";
+      noMatchEl.style.display = "none";
       return;
     }
     emptyEl.style.display = "none";
+
+    // キーワード検索（会議名・場所・参加者・各本文欄を横断）と期間絞り込みを適用する
+    const q = notesSearchQuery.trim().toLowerCase();
+    const entries = allEntries.filter(([, note]) => {
+      if (notesDateFromMs != null && (note.datetime || 0) < notesDateFromMs) return false;
+      if (notesDateToMs != null && (note.datetime || 0) > notesDateToMs) return false;
+      if (q) {
+        const haystack = [
+          note.eventTitle, note.location, note.participants, note.counterpart,
+          note.purpose, note.decisions, note.nextSteps, note.minutes,
+          note.challenges, note.aiSummary
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (entries.length === 0) {
+      noMatchEl.style.display = "block";
+      return;
+    }
+    noMatchEl.style.display = "none";
 
     for (const [noteId, note] of entries) {
       const item = document.createElement("div");
@@ -921,6 +975,27 @@
   }
 
   $("newNoteBtn").addEventListener("click", () => openNoteEditor({ defaultDatetime: Date.now() }));
+
+  // キーワード検索・期間絞り込みの入力ハンドラ
+  $("notesSearchInput").addEventListener("input", (e) => {
+    notesSearchQuery = e.target.value;
+    renderNotesList();
+  });
+  $("notesDateFrom").addEventListener("change", (e) => {
+    notesDateFromMs = e.target.value ? new Date(e.target.value + "T00:00:00").getTime() : null;
+    renderNotesList();
+  });
+  $("notesDateTo").addEventListener("change", (e) => {
+    notesDateToMs = e.target.value ? new Date(e.target.value + "T23:59:59").getTime() : null;
+    renderNotesList();
+  });
+  $("notesDateClearBtn").addEventListener("click", () => {
+    $("notesDateFrom").value = "";
+    $("notesDateTo").value = "";
+    notesDateFromMs = null;
+    notesDateToMs = null;
+    renderNotesList();
+  });
 
   // ─────────────────────────────────────────────────────────
   // タブ切り替え（予定済みの会議 / 保存済みのメモ）
