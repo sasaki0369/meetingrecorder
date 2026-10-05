@@ -423,7 +423,7 @@
     getRedirectResult, onAuthStateChanged, signOut
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
-    getDatabase, ref, onValue, push, set, get, remove, serverTimestamp
+    getDatabase, ref, onValue, push, set, update, get, remove, serverTimestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
   import {
     getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
@@ -825,6 +825,12 @@
     );
   }
 
+  // 画像だけが先に書き込まれて作られた「骨組み」ノード（日時を持たない）は、
+  // 保存済みのメモとは扱わない。保存済みのメモは必ずdatetimeを持つ。
+  function isSavedNote(key) {
+    return !!notesData[key] && notesData[key].datetime != null;
+  }
+
   // キーワード検索・期間絞り込みの状態
   let notesSearchQuery = "";
   let notesDateFromMs = null;
@@ -840,7 +846,7 @@
     // さらに要約も無い「終了済みのみ」の会議（finished）を合わせて一覧化する。
     // 優先順位は notes > summaries > finished とし、同じ会議を重複表示しない。
     const summaryOnlyEntries = Object.entries(summariesData)
-      .filter(([recordingId]) => !("r" + recordingId in notesData))
+      .filter(([recordingId]) => !isSavedNote("r" + recordingId))
       .map(([recordingId, summary]) => [
         "r" + recordingId,
         {
@@ -853,7 +859,7 @@
       ]);
 
     const finishedOnlyEntries = Object.entries(finishedData)
-      .filter(([recordingId]) => !("r" + recordingId in notesData) && !(recordingId in summariesData))
+      .filter(([recordingId]) => !isSavedNote("r" + recordingId) && !(recordingId in summariesData))
       .map(([recordingId, finished]) => [
         "r" + recordingId,
         {
@@ -864,7 +870,7 @@
         }
       ]);
 
-    const allEntries = [...Object.entries(notesData), ...summaryOnlyEntries, ...finishedOnlyEntries].sort((a, b) => {
+    const allEntries = [...Object.entries(notesData).filter(([k]) => isSavedNote(k)), ...summaryOnlyEntries, ...finishedOnlyEntries].sort((a, b) => {
       const at = a[1].datetime || 0;
       const bt = b[1].datetime || 0;
       return bt - at; // 新しい順
@@ -966,9 +972,9 @@
 
     if (!id && recordingId != null) {
       id = "r" + recordingId; // recordingId起点のメモは "r<id>" というキーにする
-      existing = notesData[id] || null;
+      existing = isSavedNote(id) ? notesData[id] : null;
     } else if (id) {
-      existing = notesData[id] || null;
+      existing = isSavedNote(id) ? notesData[id] : null;
     }
 
     if (!id) {
@@ -1302,7 +1308,9 @@
         aiSummary: $("noteAiSummary").value.trim(),
         updatedAt: serverTimestamp()
       };
-      await set(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
+      // 重要：set()だと、フォームに無い子ノード（貼り付けた画像の参照 images）まで
+      // 消えてしまうため、フォームの項目だけを更新するupdate()を使う。
+      await update(ref(db, "meetingRecorder/notes/" + editingNoteId), payload);
       $("noteSavedLabel").style.display = "block";
       $("noteDeleteBtn").style.display = "block"; // 新規作成分も保存後は削除できるようにする
       originalNoteSnapshot = captureNoteSnapshot(); // 保存済みの内容を新たな基準にする
