@@ -191,6 +191,49 @@
     background: #EEE;
     color: #777;
   }
+  .image-paste-zone {
+    border: 2px dashed var(--gray-border);
+    border-radius: 12px;
+    padding: 18px;
+    text-align: center;
+    color: #999;
+    font-size: 0.85rem;
+    cursor: pointer;
+    outline: none;
+    background: var(--cream);
+  }
+  .image-paste-zone:focus { border-color: var(--terracotta); color: var(--terracotta); }
+  .image-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .image-thumb {
+    position: relative;
+    width: 92px;
+    height: 92px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--gray-border);
+    background: #EEE;
+  }
+  .image-thumb img {
+    width: 100%; height: 100%; object-fit: cover; cursor: pointer; display: block;
+  }
+  .image-thumb.uploading img { opacity: 0.4; }
+  .image-thumb .spinner-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; color: var(--navy-soft);
+  }
+  .image-thumb .delete-btn {
+    position: absolute; top: 3px; right: 3px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    border: none; border-radius: 50%;
+    width: 22px; height: 22px; font-size: 14px; line-height: 1;
+    cursor: pointer; padding: 0;
+  }
   .note-item .meta { font-size: 0.8rem; color: var(--navy-soft); margin-top: 2px; }
   .note-item .snippet {
     font-size: 0.82rem; color: #777; margin-top: 6px;
@@ -287,6 +330,17 @@
           <textarea id="noteMinutes" class="tall" placeholder="会議中の発言・気づきなどを自由に記録"></textarea>
         </div>
         <div class="field">
+          <label>画像</label>
+          <p class="muted" style="margin: 0 0 8px;">
+            会議中にコピーした画像（スクリーンショット等）をそのまま貼り付けられます。
+            保存した画像は、ログインしているどの端末からでも見られます。
+          </p>
+          <div id="imagePasteZone" class="image-paste-zone" tabindex="0">
+            ここをクリックしてから貼り付け（Ctrl+V / ⌘+V）
+          </div>
+          <div id="imageGrid" class="image-grid"></div>
+        </div>
+        <div class="field">
           <label>次回への課題</label>
           <textarea id="noteChallenges"></textarea>
         </div>
@@ -368,6 +422,9 @@
   import {
     getDatabase, ref, onValue, push, set, get, remove, serverTimestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import {
+    getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAxVn7JUuoBsNeSODksNYyEkd2W2E252_c",
@@ -382,6 +439,7 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getDatabase(app);
+  const storage = getStorage(app);
   const provider = new GoogleAuthProvider();
 
   const $ = (id) => document.getElementById(id);
@@ -686,6 +744,8 @@
   let editingNoteId = null;
   let editingRecordingId = null; // 保存時に「この会議は録音継続中か」を判定するために保持
   let originalNoteSnapshot = null; // 開いた時点（または保存直後）の内容。未保存の変更検知に使う
+  let noteImagesUnsubscribe = null; // 現在開いているメモの画像一覧リスナー
+  let currentNoteImagesNoteId = null; // 画像の貼り付け先（アップロード中にメモが切り替わった場合の誤爆防止用）
 
   // 現在フォームに入力されている内容をスナップショット化する（比較用の文字列）
   function captureNoteSnapshot() {
@@ -945,6 +1005,9 @@
     // メモ削除ボタンは、既に保存済みのメモを開いた場合のみ表示する（新規作成時は無意味なため）
     $("noteDeleteBtn").style.display = existing ? "block" : "none";
 
+    // このメモに紐づく画像一覧をリアルタイムに購読する（他端末からの追加・削除も即反映される）
+    subscribeNoteImages(id);
+
     $("noteSavedLabel").style.display = "none";
     $("noteEditorCard").style.display = "block";
     // block:"nearest"にすることで、メモ欄がstatusCard（終了ボタン）のすぐ下にある場合、
@@ -973,6 +1036,129 @@
       }
     }
   }
+
+  // ─────────────────────────────────────────────────────────
+  // 画像（会議中にコピーした画像の貼り付け・端末間共有）
+  // 画像の実体はFirebase Storageに保存し、Realtime Database側には
+  // meetingRecorder/notes/<noteId>/images/<imageId> にURL等の参照のみを置く。
+  // 画像はテキスト欄の保存ボタンを待たず、貼り付けた時点で即座にアップロード・保存される
+  // （大きなデータのため、他のテキスト項目と挙動をあえて分けている）。
+  // ─────────────────────────────────────────────────────────
+
+  function subscribeNoteImages(noteId) {
+    if (noteImagesUnsubscribe) {
+      noteImagesUnsubscribe();
+      noteImagesUnsubscribe = null;
+    }
+    currentNoteImagesNoteId = noteId;
+    const imagesRef = ref(db, "meetingRecorder/notes/" + noteId + "/images");
+    noteImagesUnsubscribe = onValue(
+      imagesRef,
+      (snapshot) => {
+        renderNoteImages(snapshot.val() || {});
+      },
+      (error) => console.warn("画像一覧の取得に失敗しました", error)
+    );
+  }
+
+  function renderNoteImages(images) {
+    const grid = $("imageGrid");
+    grid.innerHTML = "";
+    const entries = Object.entries(images).sort((a, b) => (a[1].uploadedAt || 0) - (b[1].uploadedAt || 0));
+    for (const [imageId, image] of entries) {
+      const thumb = document.createElement("div");
+      thumb.className = "image-thumb";
+
+      const img = document.createElement("img");
+      img.src = image.url;
+      img.alt = "添付画像";
+      img.addEventListener("click", () => window.open(image.url, "_blank"));
+      thumb.appendChild(img);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "delete-btn";
+      delBtn.textContent = "×";
+      delBtn.title = "この画像を削除";
+      delBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteNoteImage(imageId, image.storagePath);
+      });
+      thumb.appendChild(delBtn);
+
+      grid.appendChild(thumb);
+    }
+  }
+
+  async function uploadPastedImageBlob(blob) {
+    const noteId = editingNoteId;
+    if (!noteId) return;
+
+    // アップロード中であることが分かるよう、仮のサムネイルを先に表示しておく
+    const grid = $("imageGrid");
+    const placeholder = document.createElement("div");
+    placeholder.className = "image-thumb uploading";
+    const spinnerLabel = document.createElement("div");
+    spinnerLabel.className = "spinner-label";
+    spinnerLabel.textContent = "送信中…";
+    placeholder.appendChild(spinnerLabel);
+    grid.appendChild(placeholder);
+
+    try {
+      const ext = (blob.type && blob.type.split("/")[1]) || "png";
+      const fileName = Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "." + ext;
+      const storagePath = "meetingRecorder/noteImages/" + noteId + "/" + fileName;
+      const fileRef = storageRef(storage, storagePath);
+      await uploadBytes(fileRef, blob, { contentType: blob.type || "image/png" });
+      const url = await getDownloadURL(fileRef);
+
+      // アップロード中に別のメモへ切り替えられていた場合は、参照の書き込みをスキップする
+      // （画像データ自体はStorageに残るが、孤立しても実害は無いため許容する）
+      if (currentNoteImagesNoteId !== noteId) {
+        placeholder.remove();
+        return;
+      }
+
+      const imagesRef = ref(db, "meetingRecorder/notes/" + noteId + "/images");
+      await push(imagesRef, { url, storagePath, uploadedAt: serverTimestamp() });
+      // 実際の表示はリアルタイムリスナー（renderNoteImages）が更新するため、
+      // ここではプレースホルダーを消すだけでよい
+      placeholder.remove();
+    } catch (e) {
+      placeholder.remove();
+      showError("画像のアップロードに失敗しました: " + e.message);
+    }
+  }
+
+  async function deleteNoteImage(imageId, storagePath) {
+    if (!editingNoteId) return;
+    if (!confirm("この画像を削除しますか？")) return;
+    try {
+      await remove(ref(db, "meetingRecorder/notes/" + editingNoteId + "/images/" + imageId));
+      if (storagePath) {
+        try {
+          await deleteObject(storageRef(storage, storagePath));
+        } catch (e) {
+          // Storage側の実体削除に失敗しても、参照は既に消えているので致命的ではない
+          console.warn("Storage上の画像削除に失敗しました", e);
+        }
+      }
+    } catch (e) {
+      showError("画像の削除に失敗しました: " + e.message);
+    }
+  }
+
+  // クリップボードからの画像貼り付けを検知する（貼り付けゾーンにフォーカスしてCtrl+V/⌘+V）
+  $("imagePasteZone").addEventListener("paste", (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type && item.type.startsWith("image/")) {
+        const blob = item.getAsFile();
+        if (blob) uploadPastedImageBlob(blob);
+        e.preventDefault();
+      }
+    }
+  });
 
   $("newNoteBtn").addEventListener("click", () => openNoteEditor({ defaultDatetime: Date.now() }));
 
@@ -1016,6 +1202,8 @@
     editingNoteId = null;
     editingRecordingId = null;
     originalNoteSnapshot = null;
+    if (noteImagesUnsubscribe) { noteImagesUnsubscribe(); noteImagesUnsubscribe = null; }
+    currentNoteImagesNoteId = null;
   });
 
   // Android側に文字起こし・要約の実行を指示する。結果はAndroid側にテキストとして保存され、
@@ -1117,11 +1305,31 @@
     const btn = $("noteDeleteBtn");
     btn.disabled = true;
     try {
+      // メモ本体を削除する前に、紐づく画像の実体をStorageから削除しておく
+      // （参照先を失った孤立ファイルとして残り続けないようにするため）。
+      try {
+        const imagesSnap = await get(ref(db, "meetingRecorder/notes/" + editingNoteId + "/images"));
+        if (imagesSnap.exists()) {
+          const images = imagesSnap.val();
+          await Promise.all(
+            Object.values(images).map((image) =>
+              image.storagePath
+                ? deleteObject(storageRef(storage, image.storagePath)).catch(() => {})
+                : Promise.resolve()
+            )
+          );
+        }
+      } catch (e) {
+        console.warn("画像の削除中にエラーが発生しました（メモ自体の削除は続行します）", e);
+      }
+
       await remove(ref(db, "meetingRecorder/notes/" + editingNoteId));
       $("noteEditorCard").style.display = "none";
       editingNoteId = null;
       editingRecordingId = null;
       originalNoteSnapshot = null;
+      if (noteImagesUnsubscribe) { noteImagesUnsubscribe(); noteImagesUnsubscribe = null; }
+      currentNoteImagesNoteId = null;
     } catch (e) {
       showError("メモの削除に失敗しました: " + e.message);
     } finally {
