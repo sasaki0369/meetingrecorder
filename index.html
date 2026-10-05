@@ -335,9 +335,12 @@
             会議中にコピーした画像（スクリーンショット等）をそのまま貼り付けられます。
             保存した画像は、ログインしているどの端末からでも見られます。
           </p>
-          <div id="imagePasteZone" class="image-paste-zone" tabindex="0">
-            ここをクリックしてから貼り付け（Ctrl+V / ⌘+V）
+          <div id="imagePasteZone" class="image-paste-zone">
+            メモ編集画面を開いた状態で Ctrl+V（⌘+V）を押すと、コピーした画像が貼り付けられます
           </div>
+          <button id="imagePasteBtn" class="btn-outline" style="margin-top:8px;">
+            クリップボードの画像を貼り付け（ボタン）
+          </button>
           <div id="imageGrid" class="image-grid"></div>
         </div>
         <div class="field">
@@ -1125,7 +1128,16 @@
       placeholder.remove();
     } catch (e) {
       placeholder.remove();
-      showError("画像のアップロードに失敗しました: " + e.message);
+      // Storage未設定・ルール未設定が典型的な原因のため、見分けやすいメッセージにする
+      let hint = "";
+      if (e && (e.code === "storage/unauthorized" || /permission|unauthorized/i.test(e.message || ""))) {
+        hint = "（Firebase Storageのセキュリティルールが未設定、またはこのアカウントに権限がありません。READMEの手順6を確認してください）";
+      } else if (e && (e.code === "storage/bucket-not-found" || e.code === "storage/project-not-found")) {
+        hint = "（Firebase Storageが有効化されていません。Firebaseコンソールの「Storage」から「使ってみる」で有効化してください）";
+      } else if (e && e.code === "storage/retry-limit-exceeded") {
+        hint = "（通信がタイムアウトしました。Storageが未有効化の可能性があります）";
+      }
+      showError("画像のアップロードに失敗しました: " + (e.code || "") + " " + e.message + hint);
     }
   }
 
@@ -1147,16 +1159,51 @@
     }
   }
 
-  // クリップボードからの画像貼り付けを検知する（貼り付けゾーンにフォーカスしてCtrl+V/⌘+V）
-  $("imagePasteZone").addEventListener("paste", (e) => {
+  // クリップボードからの画像貼り付けを検知する。
+  // 重要：通常のdiv要素はフォーカスを当てただけではブラウザに「貼り付け可能な要素」と
+  // 認識されず、Ctrl+Vを押してもpasteイベントが発火しないことがある。そのため、
+  // 貼り付けゾーン単体ではなくdocument全体でpasteを受け、メモ編集画面が開いている間は
+  // フォーカス位置に関わらず画像を検知できるようにする。
+  // クリップボードに画像が含まれる場合のみ処理し、通常のテキスト貼り付け
+  // （議事メモ欄への文字列ペースト等）には一切干渉しない。
+  document.addEventListener("paste", (e) => {
+    if ($("noteEditorCard").style.display !== "block") return;
     const items = e.clipboardData?.items;
     if (!items) return;
+    let handled = false;
     for (const item of items) {
       if (item.type && item.type.startsWith("image/")) {
         const blob = item.getAsFile();
-        if (blob) uploadPastedImageBlob(blob);
-        e.preventDefault();
+        if (blob) {
+          uploadPastedImageBlob(blob);
+          handled = true;
+        }
       }
+    }
+    if (handled) e.preventDefault();
+  });
+
+  // Ctrl+Vが使えない・効かない環境（モバイルブラウザ等）向けの「貼り付けボタン」。
+  // ClipboardのreadAPIでクリップボード内の画像を直接読み取る（ブラウザが許可を求める場合あり）。
+  $("imagePasteBtn").addEventListener("click", async () => {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      showError("お使いのブラウザはボタンからの貼り付けに対応していません。Ctrl+V（⌘+V）をお試しください。");
+      return;
+    }
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      let found = false;
+      for (const clipboardItem of clipboardItems) {
+        const imageType = clipboardItem.types.find((t) => t.startsWith("image/"));
+        if (imageType) {
+          const blob = await clipboardItem.getType(imageType);
+          uploadPastedImageBlob(blob);
+          found = true;
+        }
+      }
+      if (!found) showError("クリップボードに画像が見つかりませんでした。");
+    } catch (e) {
+      showError("クリップボードの読み取りに失敗しました（ブラウザの許可が必要な場合があります）: " + e.message);
     }
   });
 
